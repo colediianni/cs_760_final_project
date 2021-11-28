@@ -11,6 +11,7 @@ from tensorflow import keras
 from tensorflow.keras import layers
 from sklearn.model_selection import StratifiedKFold
 import os
+import argparse
 from diagnostics import *
 
 
@@ -23,6 +24,12 @@ def main():
             {x,y}_train_out:    Not used for shadow model, training data for attack model
             {x,y}_test_out:     Not used for shadow model, test data for attack model
     """
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--ow_cnn", action='store_true', help="train new shadow model")
+    parser.add_argument("--ow_atk", action='store_true', help="train new attack model")
+    args = parser.parse_args()
+
     num_classes = 10
     save_dir = os.path.join(os.getcwd(), 'saved_models')
 
@@ -33,11 +40,11 @@ def main():
     (x_train_out,    y_train_out,    x_test_out,    y_test_out)) = get_data()
 
     cnn = load_shadow_model(x_train_in, y_train_in, x_test_in, y_test_in, save_dir,
-                            epochs=10, overwrite=False)
+                            epochs=100, k=5, overwrite=args.ow_cnn)
 
 
     # CHECK DISTRIBUTION OF TOP PREDICTIONS
-    #top1cdf(cnn, x_train_in, x_train_out)
+    top1cdf(cnn, x_train_in, x_train_out)
 
     # GENERATE DATA FOR ATTACK MODEL
     k = 3 # input consists of top-k predictions
@@ -49,7 +56,7 @@ def main():
     out_test  = d(x_test_out)
     
     attack_model = load_attack_model(in_train, out_train, in_test, out_test, save_dir,
-            overwrite=True)
+            overwrite=args.ow_atk)
 
 
     #score = attack_model.evaluate(X_test, y_test, verbose=0)
@@ -135,7 +142,8 @@ def load_attack_model(x_train_in, x_train_out, x_test_in, x_test_out, save_dir,
     # report training accuracy
     score = model.evaluate(X, y, verbose=0)
     print("Training loss:", score[0])
-    print("Training accuracy:", score[1])
+    print("Training precision:", score[1])
+    print("Training recall:", score[2])
 
     return model
 
@@ -155,15 +163,15 @@ def get_attack_model(input_shape=3, num_classes=2):
 
 
 def train_attack_model(model, x_train, y_train, batch_size=128, epochs=100,
-        loss="binary_crossentropy", optimizer="adam", metrics=["accuracy"],
-        val=0.1):
+        loss="binary_crossentropy", optimizer="adam", 
+        metrics=[keras.metrics.Precision(), keras.metrics.Recall()], val=0.1):
     model.compile(loss=loss, optimizer=optimizer, metrics=metrics)
     model.fit(x_train, y_train,
             batch_size=batch_size, epochs=epochs, validation_split=val, shuffle=True)
 
 
 def load_shadow_model(x_train_in, y_train_in, x_test_in, y_test_in, save_dir,
-                      epochs=100, batch_size=64, overwrite=False):
+                      epochs=100, batch_size=64, k=3, overwrite=False):
     """
     Load pre-trained shadow model, or create new one
     """
@@ -179,7 +187,7 @@ def load_shadow_model(x_train_in, y_train_in, x_test_in, y_test_in, save_dir,
         cnn = keras.models.load_model(model_path)
         print(f"Loaded saved model from {model_path}")
     except OSError:
-        cnn = get_cnn()
+        cnn = get_cnn(k=k)
 
         train_cnn(cnn, X, y, epochs=epochs, batch_size=batch_size)
 
@@ -188,9 +196,11 @@ def load_shadow_model(x_train_in, y_train_in, x_test_in, y_test_in, save_dir,
 
     cnn.summary()
     # report training error
+    """
     score = cnn.evaluate(X, y, verbose=0)
     print("Training loss:", score[0])
     print("Training accuracy:", score[1])
+    """
 
     return cnn
 
@@ -208,19 +218,19 @@ def get_cnn(input_shape=(32,32,3), num_classes=10, k=3, p=2, d=0.25):
     [
         keras.Input(shape=input_shape),
         layers.Conv2D(32, kernel_size=(k,k), activation="relu", padding="same"),
-        layers.Conv2D(32, kernel_size=(k,k), activation="relu"),
+        #layers.Conv2D(32, kernel_size=(k,k), activation="relu"),
         layers.MaxPooling2D(pool_size=(p,p)),
         #layers.Dropout(d),
 
 
-        layers.Conv2D(64, kernel_size=(k,k), activation="relu", padding="same"),
-        layers.Conv2D(64, kernel_size=(k,k), activation="relu"),
+        layers.Conv2D(32, kernel_size=(k,k), activation="relu", padding="same"),
+        #layers.Conv2D(64, kernel_size=(k,k), activation="relu"),
         layers.MaxPooling2D(pool_size=(p,p)),
         #layers.Dropout(d),
 
 
         layers.Flatten(),
-        layers.Dense(512, activation="relu"),
+        layers.Dense(50, activation="relu"),
         #layers.Dropout(0.5),
         layers.Dense(num_classes, activation="softmax"),
     ]
