@@ -3,6 +3,7 @@
 # Importing
 """
 
+import os
 import numpy
 from numpy import expand_dims
 from numpy import zeros
@@ -65,7 +66,8 @@ def define_discriminator(in_shape=(28,28,1)):
 target_model_discriminator = define_discriminator()
 x_train, y_train = load_real_samples()
 target_model_discriminator.fit(x_train, y_train, batch_size=32, epochs=10, verbose=1, validation_split = 0.1)
-target_model_discriminator.save('/path/GAN_discriminator_architecture_model.h5')
+model_save_path = os.path.join(os.getcwd(), 'target_models/GAN_discriminator_architecture_model.h5')
+target_model_discriminator.save(model_save_path)
 
 """# Second Neural Network
 From: https://machinelearningmastery.com/how-to-develop-a-cnn-from-scratch-for-fashion-mnist-clothing-classification/
@@ -86,7 +88,8 @@ def define_CNN_model():
 second_nn = define_CNN_model()
 x_train, y_train = load_real_samples()
 second_nn.fit(x_train, y_train, batch_size=32, epochs=10, verbose=1, validation_split = 0.1)
-second_nn.save('/path/internet_model.h5')
+model_save_path = os.path.join(os.getcwd(), 'target_models/internet_model.h5')
+second_nn.save(model_save_path)
 
 """# MLP Model"""
 
@@ -104,4 +107,5 @@ def define_MLP_model():
 mlp = define_MLP_model()
 x_train, y_train = load_real_samples()
 mlp.fit(x_train, y_train, batch_size=32, epochs=10, verbose=1, validation_split = 0.1)
-mlp.save('/path/mlp_model.h5')
+model_save_path = os.path.join(os.getcwd(), 'target_models/mlp_model.h5')
+mlp.save(model_save_path)

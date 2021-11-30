@@ -1,3 +1,4 @@
+import os
 import numpy
 from numpy import expand_dims
 from numpy import zeros
@@ -40,16 +41,23 @@ def load_real_samples():
     return X, Y
 
 
-x_train, y_train = load_real_samples()
+def main():
+    x_train, y_train = load_real_samples()
 
-"""Same Structure as Discriminator"""
-GAN_discriminator_architecture_model = load_model('./GAN_discriminator_architecture_model.h5')
-GAN_discriminator_architecture_model.evaluate(x_train, y_train)
+    """Same Structure as Discriminator"""
+    model_path = os.path.join(os.getcwd(), 'target_models/GAN_discriminator_architecture_model.h5')
+    GAN_discriminator_architecture_model = load_model(model_path)
+    GAN_discriminator_architecture_model.evaluate(x_train, y_train)
 
-"""Second Neural Network"""
-internet_model = load_model('./internet_model.h5')
-internet_model.evaluate(x_train, y_train)
+    """Second Neural Network"""
+    model_path = os.path.join(os.getcwd(), 'target_models/internet_model.h5')
+    internet_model = load_model(model_path)
+    internet_model.evaluate(x_train, y_train)
 
-"""MLP Model"""
-mlp_model = load_model('./mlp_model.h5')
-mlp_model.evaluate(x_train, y_train)
+    """MLP Model"""
+    model_path = os.path.join(os.getcwd(), 'target_models/mlp_model.h5')
+    mlp_model = load_model(model_path)
+    mlp_model.evaluate(x_train, y_train)
+
+if __name__ == "__main__":
+    main()
