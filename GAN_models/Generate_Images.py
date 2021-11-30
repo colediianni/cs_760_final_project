@@ -1,3 +1,4 @@
+import os
 import numpy
 from numpy import expand_dims
 from numpy import zeros
@@ -43,11 +44,17 @@ def show_plot(examples, n):
 		pyplot.imshow(examples[i, :, :, 0], cmap='gray_r')
 	pyplot.show()
 
-# load model
-model = load_model('./GAN_models/generator.h5')
-# generate images
-latent_points = generate_latent_points(100, 100)
-# generate images
-X = model.predict(latent_points)
-# plot the result
-show_plot(X, 10)
+def main():
+	# load model
+	model_path = os.path.join(os.getcwd(), 'GAN_models/generator.h5')
+	print(model_path)
+	model = load_model(model_path)
+	# generate images
+	latent_points = generate_latent_points(100, 100)
+	# generate images
+	X = model.predict(latent_points)
+	# plot the result
+	show_plot(X, 10)
+
+if __name__ == "__main__":
+    main()
