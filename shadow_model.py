@@ -12,7 +12,6 @@ from tensorflow.keras import layers
 from sklearn.model_selection import StratifiedKFold
 import os
 import argparse
-from diagnostics import *
 
 
 def main():
@@ -26,8 +25,10 @@ def main():
     """
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--ow_cnn", action='store_true', help="train new shadow model")
-    parser.add_argument("--ow_atk", action='store_true', help="train new attack model")
+    parser.add_argument("--sm_name", default="shadow_model", help="name of shadow model")
+    parser.add_argument("--am_name", default="attack_model", help="name of attack model")
+    parser.add_argument("--ow_sm", action='store_true', help="retrain and overwrite shadow model")
+    parser.add_argument("--ow_am", action='store_true', help="retrain and overwrite attack model")
     args = parser.parse_args()
 
     num_classes = 10
@@ -40,11 +41,8 @@ def main():
     (x_train_out,    y_train_out,    x_test_out,    y_test_out)) = get_data()
 
     cnn = load_shadow_model(x_train_in, y_train_in, x_test_in, y_test_in, save_dir,
-                            epochs=100, k=5, overwrite=args.ow_cnn)
+                            epochs=100, k=5, overwrite=args.ow_sm, name=args.sm_name)
 
-
-    # CHECK DISTRIBUTION OF TOP PREDICTIONS
-    top1cdf(cnn, x_train_in, x_train_out)
 
     # GENERATE DATA FOR ATTACK MODEL
     k = 3 # input consists of top-k predictions
@@ -56,7 +54,7 @@ def main():
     out_test  = d(x_test_out)
     
     attack_model = load_attack_model(in_train, out_train, in_test, out_test, save_dir,
-            overwrite=args.ow_atk)
+            overwrite=args.ow_am, name=args.am_name)
 
 
     #score = attack_model.evaluate(X_test, y_test, verbose=0)
@@ -100,13 +98,12 @@ def shadow_split(x_train, y_train, x_test, y_test, seed=31415):
 
 
 def load_attack_model(x_train_in, x_train_out, x_test_in, x_test_out, save_dir,
-        epochs=100, overwrite=False):
+        epochs=100, overwrite=False, name="attack_model"):
     """
     Load pre-trained attack model, or create new one
     input data should consist of top-k prediction vectors from shadow model
     """
-    model_name = "attack_model"
-    model_path = os.path.join(save_dir, model_name)
+    model_path = os.path.join(save_dir, name + ".h5")
 
     ones  = keras.initializers.Ones()
     zeros = keras.initializers.Zeros()
@@ -152,7 +149,7 @@ def get_attack_model(input_shape=3, num_classes=2):
     model = keras.Sequential(
     [
         keras.Input(shape=input_shape),
-        layers.Dense(64, activation="relu"),
+        layers.Dense(64, activation="tanh"),
         #    kernel_regularizer = keras.regularizers.l2(0.1)),
         #layers.Dropout(0.5),
         layers.Dense(num_classes, activation="softmax")
@@ -171,12 +168,11 @@ def train_attack_model(model, x_train, y_train, batch_size=128, epochs=100,
 
 
 def load_shadow_model(x_train_in, y_train_in, x_test_in, y_test_in, save_dir,
-                      epochs=100, batch_size=64, k=3, overwrite=False):
+                      epochs=100, batch_size=64, k=3, overwrite=False, name="shadow_model"):
     """
     Load pre-trained shadow model, or create new one
     """
-    model_name = "shadow_model"
-    model_path = os.path.join(save_dir, model_name)
+    model_path = os.path.join(save_dir, name + ".h5")
 
     X = keras.layers.Concatenate(axis=0)([x_train_in, x_test_in])
     y = keras.layers.Concatenate(axis=0)([y_train_in, y_test_in])
@@ -214,23 +210,27 @@ def get_cnn(input_shape=(32,32,3), num_classes=10, k=3, p=2, d=0.25):
         k: dimension of the kernels
         p: dimension of the max-pool operation
     """
+    initializer = tf.keras.initializers.GlorotUniform()
+    l2 = tf.keras.regularizers.L2(l2=10e-7)
     model = keras.Sequential(
     [
         keras.Input(shape=input_shape),
-        layers.Conv2D(32, kernel_size=(k,k), activation="relu", padding="same"),
+        layers.Conv2D(32, kernel_size=(k,k), activation="relu", padding="same",
+            kernel_initializer=initializer, kernel_regularizer=l2),
         #layers.Conv2D(32, kernel_size=(k,k), activation="relu"),
         layers.MaxPooling2D(pool_size=(p,p)),
         #layers.Dropout(d),
 
 
-        layers.Conv2D(32, kernel_size=(k,k), activation="relu", padding="same"),
+        layers.Conv2D(32, kernel_size=(k,k), activation="relu", padding="same",
+            kernel_initializer=initializer, kernel_regularizer=l2),
         #layers.Conv2D(64, kernel_size=(k,k), activation="relu"),
         layers.MaxPooling2D(pool_size=(p,p)),
         #layers.Dropout(d),
 
 
         layers.Flatten(),
-        layers.Dense(50, activation="relu"),
+        layers.Dense(50, activation="tanh", kernel_regularizer=l2),
         #layers.Dropout(0.5),
         layers.Dense(num_classes, activation="softmax"),
     ]
@@ -240,10 +240,12 @@ def get_cnn(input_shape=(32,32,3), num_classes=10, k=3, p=2, d=0.25):
 
 
 def train_cnn(model, x_train, y_train,
-              batch_size=32, epochs=100, loss="categorical_crossentropy",
-              optimizer="adam", metrics=["accuracy"], val=0.1):
+              batch_size=64, epochs=100, loss="categorical_crossentropy",
+              optimizer=tf.keras.optimizers.Adam, metrics=["accuracy"], val=0.1,
+              lr=0.001):
     
-    model.compile(loss=loss, optimizer=optimizer, metrics=metrics)
+    model.compile(loss=loss, optimizer=optimizer(learning_rate=lr), 
+            metrics=metrics)
     model.fit(x_train, y_train, 
               batch_size=batch_size, epochs=epochs, validation_split=val)
 
@@ -252,14 +254,18 @@ def get_data():
     num_classes = 10
     (x_train, y_train), (x_test, y_test) = cifar10()
 
+    # scale from [0, 255] to [-1, 1]
+    x_train = (x_train - 127.5) / 127.5
+    x_test  = (x_test  - 127.5) / 127.5
+
     ((x_train_in,    y_train_in,     x_test_in,     y_test_in),
     (x_train_out,    y_train_out,    x_test_out,    y_test_out)) = shadow_split(
             x_train, y_train, x_test, y_test)
 
-    y_train_in = keras.utils.to_categorical(y_train_in, num_classes)
+    y_train_in =  keras.utils.to_categorical(y_train_in,  num_classes)
     y_train_out = keras.utils.to_categorical(y_train_out, num_classes)
-    y_test_in = keras.utils.to_categorical(y_test_in, num_classes)
-    y_test_out = keras.utils.to_categorical(y_test_out, num_classes)
+    y_test_in =   keras.utils.to_categorical(y_test_in,   num_classes)
+    y_test_out =  keras.utils.to_categorical(y_test_out,  num_classes)
 
     return ((x_train_in,    y_train_in,     x_test_in,     y_test_in),
     (x_train_out,    y_train_out,    x_test_out,    y_test_out))
