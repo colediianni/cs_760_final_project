@@ -17,8 +17,8 @@ def main():
     ((x_train_in,    y_train_in,     x_test_in,     y_test_in),
     (x_train_out,    y_train_out,    x_test_out,    y_test_out)) = get_data()
 
-    shadow_model = keras.models.load_model('saved_models/shadow_model')
-    attack_model = keras.models.load_model('saved_models/attack_model')
+    shadow_model = keras.models.load_model('saved_models/shadow_model.h5')
+    attack_model = keras.models.load_model('saved_models/attack_model.h5')
 
     attack_model_decision_boundary(attack_model, show=False)
 
