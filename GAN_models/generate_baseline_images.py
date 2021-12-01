@@ -1,4 +1,5 @@
 import os
+import pandas as pd
 import numpy
 from numpy import expand_dims
 from numpy import zeros
@@ -40,8 +41,8 @@ def save_images_to_folder(examples, image_folder_path):
 		if i % 1000 == 0:
 			print(i)
 		pyplot.imshow(examples[i, :, :, 0], cmap='gray_r')
-		save_path = os.path.join(os.getcwd(), 'GAN_models/baseline_images/generated_image'+str(i))
-		pyplot.savefig(save_path, format="pdf")
+		save_path = os.path.join(os.getcwd(), image_folder_path+'generated_image'+str(i))
+		pyplot.savefig(save_path, format="png")
 		pyplot.clf()
 
 def main():
@@ -55,9 +56,13 @@ def main():
 	latent_points = generate_latent_points(100, num_images_to_generate)
 	# generate images
 	X = model.predict(latent_points)
-	# plot the result
-	image_folder_path = os.path.join(os.getcwd(), 'GAN_models/baseline_images')
-	save_images_to_folder(X, 10)
+	# save figure values to csv file
+	X_to_save = pd.DataFrame(X.reshape((X.shape[0], X.shape[1] * X.shape[2])))
+	image_values_file_path = os.path.join(os.getcwd(), 'GAN_models/baseline_image_values.csv')
+	X_to_save.to_csv(image_values_file_path)
+	# # plot the result
+	image_folder_path = os.path.join(os.getcwd(), 'GAN_models/baseline_images/')
+	save_images_to_folder(X, image_folder_path)
 
 if __name__ == "__main__":
     main()
