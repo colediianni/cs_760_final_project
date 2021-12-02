@@ -247,48 +247,51 @@ def generate_fake_samples(generator, latent_dim, n_samples):
 # train the generator and discriminator
 def train(g_model, d_model, gan_model, membership_construction_branch_model, dataset, latent_dim, n_epochs=100, n_batch=128):
     save_dir = os.path.join(os.getcwd(), 'saved_models', 'constructor')
+    log_file = os.path.join(save_dir, 'saved_results.log')
 
     bat_per_epo = int(dataset.shape[0] / n_batch)
     print("Number of batches:", bat_per_epo)
     half_batch = int(n_batch / 2)
     # manually enumerate epochs
-    for i in range(n_epochs):
-        # enumerate batches over the training set
-        for j in range(bat_per_epo):
-            # get randomly selected 'real' samples
-            X_real, y_real = generate_real_samples(dataset, half_batch)
-            # update discriminator model weights
-            d_loss1, _ = d_model.train_on_batch(X_real, y_real)
-            # generate 'fake' examples
-            X_fake, y_fake = generate_fake_samples(g_model, latent_dim, half_batch)
-            # update discriminator model weights
-            d_loss2, _ = d_model.train_on_batch(X_fake, y_fake)
-            # prepare points in latent space as input for the generator
-            X_gan = generate_latent_points(latent_dim, n_batch)
-            # create inverted labels for the fake samples
-            y_gan = ones((n_batch, 1))
-            # update the generator via the discriminator's error
-            g_loss = gan_model.train_on_batch(X_gan, y_gan)
-            X_gan = generate_latent_points(latent_dim, n_batch)
-            # create inverted labels for the fake samples
-            y_gan = ones((n_batch, 1))
-            # update labels to match the attack model's output
-            y_gan = keras.utils.to_categorical(y_gan, 2)
-            # update the generator via the discriminator's error
-            mi_loss = membership_construction_branch_model.train_on_batch(X_gan, y_gan)
-            # summarize loss on this batch
-            #print('>%d, d1=%.3f, d2=%.3f g=%.3f, mi=%.3f' % (i+1, d_loss1, d_loss2, g_loss, mi_loss))
-            print(f"{i+1},{j+1}: {d_loss1}, {d_loss2}, {g_loss}, {mi_loss}")
-        if True: #(i+1)%5 == 0:
-            # save partial results
-            g_model.save(os.path.join(save_dir, f"epoch{i+1}.h5"))
-            # take a look at what the generator is doing
-            imgs, _ = generate_fake_samples(g_model, latent_dim, 25)
-            for k in range(25):
-                plt.subplot(5, 5, k+1)
-                plt.axis('off')
-                plt.imshow(imgs[k, :, :, 0], cmap='gray_r')
-            plt.savefig(os.path.join(save_dir, f"epoch{i+1}.png"))
+    with open(log_file) as fobj:
+        for i in range(n_epochs):
+            # enumerate batches over the training set
+            for j in range(bat_per_epo):
+                # get randomly selected 'real' samples
+                X_real, y_real = generate_real_samples(dataset, half_batch)
+                # update discriminator model weights
+                d_loss1, _ = d_model.train_on_batch(X_real, y_real)
+                # generate 'fake' examples
+                X_fake, y_fake = generate_fake_samples(g_model, latent_dim, half_batch)
+                # update discriminator model weights
+                d_loss2, _ = d_model.train_on_batch(X_fake, y_fake)
+                # prepare points in latent space as input for the generator
+                X_gan = generate_latent_points(latent_dim, n_batch)
+                # create inverted labels for the fake samples
+                y_gan = ones((n_batch, 1))
+                # update the generator via the discriminator's error
+                g_loss = gan_model.train_on_batch(X_gan, y_gan)
+                X_gan = generate_latent_points(latent_dim, n_batch)
+                # create inverted labels for the fake samples
+                y_gan = ones((n_batch, 1))
+                # update labels to match the attack model's output
+                y_gan = keras.utils.to_categorical(y_gan, 2)
+                # update the generator via the discriminator's error
+                mi_loss = membership_construction_branch_model.train_on_batch(X_gan, y_gan)
+                # summarize loss on this batch
+                #print('>%d, d1=%.3f, d2=%.3f g=%.3f, mi=%.3f' % (i+1, d_loss1, d_loss2, g_loss, mi_loss))
+                print(f"{i+1},{j+1}: {d_loss1}, {d_loss2}, {g_loss}, {mi_loss}")
+                fobj.write(f"{i+1},{j+1}: {d_loss1}, {d_loss2}, {g_loss}, {mi_loss}\n")
+            if (i+1)%5 == 0:
+                # save partial results
+                g_model.save(os.path.join(save_dir, f"epoch{i+1}.h5"))
+                # take a look at what the generator is doing
+                imgs, _ = generate_fake_samples(g_model, latent_dim, 25)
+                for k in range(25):
+                    plt.subplot(5, 5, k+1)
+                    plt.axis('off')
+                    plt.imshow(imgs[k, :, :, 0], cmap='gray_r')
+                plt.savefig(os.path.join(save_dir, f"epoch{i+1}.png"))
 
     # save the generator model
     g_model.save(os.path.join(save_dir, 'branched_membership_attack_model.h5'))
