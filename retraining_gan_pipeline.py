@@ -5,6 +5,7 @@
 
 import os
 import numpy
+import matplotlib.pyplot as plt
 from numpy import expand_dims
 from numpy import zeros
 from numpy import ones
@@ -59,7 +60,6 @@ def main():
     generator._name     = "generator"
     # create the membership construction branch
     membership_construction_branch_model = define_membership_constructor(generator, target_model, attack_model)
-    print(membership_construction_branch_model.metric_names)
 
     plot_model(membership_construction_branch_model, show_shapes=True, 
             show_layer_names=True, to_file='constructor.png')
@@ -246,7 +246,10 @@ def generate_fake_samples(generator, latent_dim, n_samples):
 
 # train the generator and discriminator
 def train(g_model, d_model, gan_model, membership_construction_branch_model, dataset, latent_dim, n_epochs=100, n_batch=128):
+    save_dir = os.path.join(os.getcwd(), 'saved_models', 'constructor')
+
     bat_per_epo = int(dataset.shape[0] / n_batch)
+    print("Number of batches:", bat_per_epo)
     half_batch = int(n_batch / 2)
     # manually enumerate epochs
     for i in range(n_epochs):
@@ -275,9 +278,20 @@ def train(g_model, d_model, gan_model, membership_construction_branch_model, dat
             mi_loss = membership_construction_branch_model.train_on_batch(X_gan, y_gan)
             # summarize loss on this batch
             #print('>%d, d1=%.3f, d2=%.3f g=%.3f, mi=%.3f' % (i+1, d_loss1, d_loss2, g_loss, mi_loss))
-            print(f"{i+1}: {d_loss1}, {d_loss2}, {g_loss}, {mi_loss}")
+            print(f"{i+1},{j+1}: {d_loss1}, {d_loss2}, {g_loss}, {mi_loss}")
+        if True: #(i+1)%5 == 0:
+            # save partial results
+            g_model.save(os.path.join(save_dir, f"epoch{i+1}.h5"))
+            # take a look at what the generator is doing
+            imgs, _ = generate_fake_samples(g_model, latent_dim, 25)
+            for i in range(25):
+                plt.subplot(5, 5, i+1)
+                plt.axis('off')
+                plt.imshow(imgs[i, :, :, 0], cmap='gray_r')
+            plt.savefig(os.path.join(save_dir, f"epoch{i+1}.png"))
+
     # save the generator model
-    g_model.save('/content/drive/MyDrive/ML_760/Final_Proj/branched_membership_attack_model.h5')
+    g_model.save(os.path.join(save_dir, 'branched_membership_attack_model.h5'))
     return g_model
 
 
