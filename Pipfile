@@ -8,6 +8,7 @@ numpy = "*"
 tensorflow = "*"
 sklearn = "*"
 seaborn = "*"
+pydot = "*"
 
 [dev-packages]
 

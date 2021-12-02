@@ -11,6 +11,11 @@ from numpy import ones
 from numpy.random import randn
 from numpy.random import randint
 import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras.datasets.fashion_mnist import load_data
+# Setting Seed
+numpy.random.seed(seed=123)
+
 from tensorflow.keras.datasets.fashion_mnist import load_data
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense
@@ -26,9 +31,45 @@ from tensorflow.keras.optimizers import SGD
 import random
 from tensorflow.keras.models import load_model
 
-# Setting Seed
-numpy.random.seed(seed=123)
-random.seed(123)
+from keras.utils.vis_utils import plot_model
+
+
+def main():
+    # Setting Seed
+    numpy.random.seed(seed=123)
+    random.seed(123)
+
+    # size of the latent space
+    latent_dim = 100
+    # create the discriminator
+    discriminator = define_discriminator()
+    # create the generator
+    generator = define_generator(latent_dim)
+    # create the gan
+    gan_branch_model = define_gan(generator, discriminator)
+
+    # load target and attack models
+    target_model_path = os.path.join(os.getcwd(), 'target_models', 'GAN_discriminator_architecture_model.h5')
+    target_model = load_model(target_model_path)
+    attack_model_path = os.path.join(os.getcwd(), 'saved_models', 'attack_model.h5')
+    attack_model = load_model(attack_model_path)
+
+    target_model._name = "target_model"
+    attack_model._name = "attack_model"
+    generator._name     = "generator"
+    # create the membership construction branch
+    membership_construction_branch_model = define_membership_constructor(generator, target_model, attack_model)
+    print(membership_construction_branch_model.metric_names)
+
+    plot_model(membership_construction_branch_model, show_shapes=True, 
+            show_layer_names=True, to_file='constructor.png')
+
+    # load image data
+    dataset = load_real_samples()
+    # train model
+    gen_model = train(generator, discriminator, gan_branch_model, membership_construction_branch_model, dataset, latent_dim)
+
+
 
 def generate_latent_points(latent_dim, n_samples):
 	# generate points in the latent space
@@ -93,16 +134,6 @@ def generate_latent_points(latent_dim, n_samples):
 
 """# Connecting Models (GAN discriminator branch)"""
 
-import numpy
-from numpy import expand_dims
-from numpy import zeros
-from numpy import ones
-from numpy.random import randn
-from numpy.random import randint
-from tensorflow.keras.datasets.fashion_mnist import load_data
-# Setting Seed
-numpy.random.seed(seed=123)
-
 # define the standalone discriminator model
 def define_discriminator(in_shape=(28,28,1)):
 	model = Sequential()
@@ -155,18 +186,22 @@ def define_gan(generator, discriminator):
 	return model
 
 def define_membership_constructor(generator, target_model, attack_model):
-  # Freeze layers (other than generator)
-  target_model.trainable = False
-  attack_model.trainable = False
 
-  model1 = generator
-  model2 = target_model(model1)
-  model3 = Lambda(lambda x: tf.nn.top_k(x, k=int(int(x.shape[-1])/2), sorted=True, name="Top_k_final").values)(model2)
-  model4 = attack_model(model3)
-  model = Model(inputs=generator.input, outputs=model4)
-  opt = tf.keras.optimizers.Adam(learning_rate=0.0002, beta_1=0.5)
-  model.compile(loss='binary_crossentropy', optimizer=opt, metrics=['accuracy'])
-  return model
+    # Freeze layers (other than generator)
+    target_model.trainable = False
+    attack_model.trainable = False
+
+
+    inputs = keras.Input(shape=(100,)) # noise vector
+    x = generator(inputs)
+    x = target_model(x)
+    #model3 = Lambda(lambda x: tf.nn.top_k(x, k=int(int(x.shape[-1])/2), sorted=True, name="Top_k_final").values)(model2)
+    x = tf.nn.top_k(x, k=3, sorted=True, name="Top_k_final").values
+    outputs = attack_model(x)
+    model = keras.Model(inputs=inputs, outputs=outputs)
+    opt = tf.keras.optimizers.Adam(learning_rate=0.0002, beta_1=0.5)
+    model.compile(loss='binary_crossentropy', optimizer=opt, metrics=['accuracy'])
+    return model
 
 # load fashion mnist images
 def load_real_samples():
@@ -234,36 +269,17 @@ def train(g_model, d_model, gan_model, membership_construction_branch_model, dat
             X_gan = generate_latent_points(latent_dim, n_batch)
             # create inverted labels for the fake samples
             y_gan = ones((n_batch, 1))
+            # update labels to match the attack model's output
+            y_gan = keras.utils.to_categorical(y_gan, 2)
             # update the generator via the discriminator's error
             mi_loss = membership_construction_branch_model.train_on_batch(X_gan, y_gan)
             # summarize loss on this batch
-            print('>%d, d1=%.3f, d2=%.3f g=%.3f, mi=%.3f' % (i+1, d_loss1, d_loss2, g_loss, mi_loss))
+            #print('>%d, d1=%.3f, d2=%.3f g=%.3f, mi=%.3f' % (i+1, d_loss1, d_loss2, g_loss, mi_loss))
+            print(f"{i+1}: {d_loss1}, {d_loss2}, {g_loss}, {mi_loss}")
     # save the generator model
     g_model.save('/content/drive/MyDrive/ML_760/Final_Proj/branched_membership_attack_model.h5')
     return g_model
 
-# size of the latent space
-latent_dim = 100
-# create the discriminator
-discriminator = define_discriminator()
-# create the generator
-generator = define_generator(latent_dim)
-# create the gan
-gan_branch_model = define_gan(generator, discriminator)
 
-# load target and attack models
-target_model_path = os.path.join(os.getcwd(), 'target_models/GAN_discriminator_architecture_model.h5')
-target_model = load_model(target_model_path)
-attack_model_path = os.path.join(os.getcwd(), 'saved_models/attack_model')
-attack_model = load_model(attack_model_path)
-
-# create the membership construction branch
-membership_construction_branch_model = define_membership_constructor(generator, target_model, attack_model)
-
-from keras.utils.vis_utils import plot_model
-plot_model(membership_construction_branch_model, show_shapes=True, show_layer_names=True)
-
-# # load image data
-# dataset = load_real_samples()
-# # train model
-# gen_model = train(generator, discriminator, gan_branch_model, membership_construction_branch_model, dataset, latent_dim)
+if __name__ == "__main__":
+    main()
