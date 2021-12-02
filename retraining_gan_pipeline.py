@@ -284,10 +284,10 @@ def train(g_model, d_model, gan_model, membership_construction_branch_model, dat
             g_model.save(os.path.join(save_dir, f"epoch{i+1}.h5"))
             # take a look at what the generator is doing
             imgs, _ = generate_fake_samples(g_model, latent_dim, 25)
-            for i in range(25):
-                plt.subplot(5, 5, i+1)
+            for k in range(25):
+                plt.subplot(5, 5, k+1)
                 plt.axis('off')
-                plt.imshow(imgs[i, :, :, 0], cmap='gray_r')
+                plt.imshow(imgs[k, :, :, 0], cmap='gray_r')
             plt.savefig(os.path.join(save_dir, f"epoch{i+1}.png"))
 
     # save the generator model
