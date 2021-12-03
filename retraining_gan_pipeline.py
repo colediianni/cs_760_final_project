@@ -32,7 +32,7 @@ from tensorflow.keras.optimizers import SGD
 import random
 from tensorflow.keras.models import load_model
 
-from keras.utils.vis_utils import plot_model
+# from keras.utils.vis_utils import plot_model
 
 import argparse
 
@@ -41,6 +41,8 @@ def main():
     parser.add_argument("--no-discriminator", action='store_true',
             help="Do not include discriminator in attack model")
     parser.add_argument("--model-name", help="name to save model under")
+    # target model name
+    parser.add_argument("--target-model-name", help="file to load attack model from")
     args = parser.parse_args()
 
     # Setting Seed
@@ -53,29 +55,30 @@ def main():
     discriminator = define_discriminator()
     # create the generator
     generator = define_generator(latent_dim)
+    generator._name = "generator"
     # create the gan
     gan_branch_model = define_gan(generator, discriminator)
 
     # load target and attack models
-    target_model_path = os.path.join(os.getcwd(), 'target_models', 'GAN_discriminator_architecture_model.h5')
+    # 'GAN_discriminator_architecture_model.h5'
+    target_model_path = os.path.join(os.getcwd(), 'target_models', args.target_model_name)
     target_model = load_model(target_model_path)
+    target_model._name = "target_model"
     attack_model_path = os.path.join(os.getcwd(), 'saved_models', 'attack_model.h5')
     attack_model = load_model(attack_model_path)
-
-    target_model._name = "target_model"
     attack_model._name = "attack_model"
-    generator._name     = "generator"
+
     # create the membership construction branch
     membership_construction_branch_model = define_membership_constructor(generator, target_model, attack_model)
 
-    plot_model(membership_construction_branch_model, show_shapes=True, 
-            show_layer_names=True, to_file='constructor.png')
+    # plot_model(membership_construction_branch_model, show_shapes=True,
+    #         show_layer_names=True, to_file='constructor.png')
 
     # load image data
     dataset = load_real_samples()
     # train model
-    gen_model = train(generator, discriminator, gan_branch_model, 
-            membership_construction_branch_model, dataset, latent_dim, 
+    gen_model = train(generator, discriminator, gan_branch_model,
+            membership_construction_branch_model, dataset, latent_dim,
             with_discriminator=not args.no_discriminator, model_name=args.model_name)
 
 
@@ -321,7 +324,6 @@ def train(g_model, d_model, gan_model, membership_construction_branch_model, dat
     # save the generator model
     g_model.save(os.path.join(save_dir, model_name))
     return g_model
-
 
 if __name__ == "__main__":
     main()
