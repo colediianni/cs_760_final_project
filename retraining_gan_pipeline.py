@@ -34,8 +34,14 @@ from tensorflow.keras.models import load_model
 
 from keras.utils.vis_utils import plot_model
 
+import argparse
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--no-discriminator", action='store_true',
+            help="Do not include discriminator in attack model")
+    args = parser.parse_args()
+
     # Setting Seed
     numpy.random.seed(seed=123)
     random.seed(123)
@@ -67,7 +73,7 @@ def main():
     # load image data
     dataset = load_real_samples()
     # train model
-    gen_model = train(generator, discriminator, gan_branch_model, membership_construction_branch_model, dataset, latent_dim)
+    gen_model = train(generator, discriminator, gan_branch_model, membership_construction_branch_model, dataset, latent_dim, with_discriminator=not args.no_discriminator)
 
 
 
@@ -245,32 +251,44 @@ def generate_fake_samples(generator, latent_dim, n_samples):
 	return X, y
 
 # train the generator and discriminator
-def train(g_model, d_model, gan_model, membership_construction_branch_model, dataset, latent_dim, n_epochs=100, n_batch=128):
-    save_dir = os.path.join(os.getcwd(), 'saved_models', 'constructor')
+def train(g_model, d_model, gan_model, membership_construction_branch_model, dataset, latent_dim, n_epochs=100, n_batch=128, with_discriminator=True):
+    cwd = os.getcwd()
+    dir_name = 'constructor'
+    save_dir = os.path.join(cwd, 'saved_models', dir_name)
+    i = 1
+    # don't overwrite previous saved models
+    while os.path.isdir(save_dir):
+        save_dir = os.path.join(cwd, 'saved_models', dir_name + f'({i})')
+        i += 1
+
+    os.makedirs(save_dir)
     log_file = os.path.join(save_dir, 'saved_results.log')
 
     bat_per_epo = int(dataset.shape[0] / n_batch)
     print("Number of batches:", bat_per_epo)
     half_batch = int(n_batch / 2)
     # manually enumerate epochs
-    with open(log_file) as fobj:
+    with open(log_file, 'w') as fobj:
+        fobj.write(f'{n_epochs} epochs, batch size {n_batch}, with discriminator: {with_discriminator}\n')
         for i in range(n_epochs):
             # enumerate batches over the training set
             for j in range(bat_per_epo):
-                # get randomly selected 'real' samples
-                X_real, y_real = generate_real_samples(dataset, half_batch)
-                # update discriminator model weights
-                d_loss1, _ = d_model.train_on_batch(X_real, y_real)
-                # generate 'fake' examples
-                X_fake, y_fake = generate_fake_samples(g_model, latent_dim, half_batch)
-                # update discriminator model weights
-                d_loss2, _ = d_model.train_on_batch(X_fake, y_fake)
-                # prepare points in latent space as input for the generator
-                X_gan = generate_latent_points(latent_dim, n_batch)
-                # create inverted labels for the fake samples
-                y_gan = ones((n_batch, 1))
-                # update the generator via the discriminator's error
-                g_loss = gan_model.train_on_batch(X_gan, y_gan)
+                if with_discriminator:
+                    # get randomly selected 'real' samples
+                    X_real, y_real = generate_real_samples(dataset, half_batch)
+                    # update discriminator model weights
+                    d_loss1, _ = d_model.train_on_batch(X_real, y_real)
+                    # generate 'fake' examples
+                    X_fake, y_fake = generate_fake_samples(g_model, latent_dim, half_batch)
+                    # update discriminator model weights
+                    d_loss2, _ = d_model.train_on_batch(X_fake, y_fake)
+                    # prepare points in latent space as input for the generator
+                    X_gan = generate_latent_points(latent_dim, n_batch)
+                    # create inverted labels for the fake samples
+                    y_gan = ones((n_batch, 1))
+                    # update the generator via the discriminator's error
+                    g_loss = gan_model.train_on_batch(X_gan, y_gan)
+
                 X_gan = generate_latent_points(latent_dim, n_batch)
                 # create inverted labels for the fake samples
                 y_gan = ones((n_batch, 1))
@@ -280,8 +298,12 @@ def train(g_model, d_model, gan_model, membership_construction_branch_model, dat
                 mi_loss = membership_construction_branch_model.train_on_batch(X_gan, y_gan)
                 # summarize loss on this batch
                 #print('>%d, d1=%.3f, d2=%.3f g=%.3f, mi=%.3f' % (i+1, d_loss1, d_loss2, g_loss, mi_loss))
-                print(f"{i+1},{j+1}: {d_loss1}, {d_loss2}, {g_loss}, {mi_loss}")
-                fobj.write(f"{i+1},{j+1}: {d_loss1}, {d_loss2}, {g_loss}, {mi_loss}\n")
+                if with_discriminator:
+                    loss_str = f"{i+1},{j+1}: {d_loss1}, {d_loss2}, {g_loss}, {mi_loss}"
+                else:
+                    loss_str = f"{i+1},{j+1}: {mi_loss}"
+                print(loss_str)
+                fobj.write(loss_str + '\n')
             if (i+1)%5 == 0:
                 # save partial results
                 g_model.save(os.path.join(save_dir, f"epoch{i+1}.h5"))
@@ -294,7 +316,12 @@ def train(g_model, d_model, gan_model, membership_construction_branch_model, dat
                 plt.savefig(os.path.join(save_dir, f"epoch{i+1}.png"))
 
     # save the generator model
-    g_model.save(os.path.join(save_dir, 'branched_membership_attack_model.h5'))
+    if with_discriminator:
+        model_name = "branched_membership_attack_model.h5"
+    else:
+        model_name = "linear_membership_attack_model.h5"
+
+    g_model.save(os.path.join(save_dir, model_name))
     return g_model
 
 
