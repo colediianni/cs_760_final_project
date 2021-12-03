@@ -40,6 +40,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--no-discriminator", action='store_true',
             help="Do not include discriminator in attack model")
+    parser.add_argument("--model-name", help="name to save model under")
     args = parser.parse_args()
 
     # Setting Seed
@@ -73,7 +74,9 @@ def main():
     # load image data
     dataset = load_real_samples()
     # train model
-    gen_model = train(generator, discriminator, gan_branch_model, membership_construction_branch_model, dataset, latent_dim, with_discriminator=not args.no_discriminator)
+    gen_model = train(generator, discriminator, gan_branch_model, 
+            membership_construction_branch_model, dataset, latent_dim, 
+            with_discriminator=not args.no_discriminator, model_name=args.model_name)
 
 
 
@@ -251,14 +254,13 @@ def generate_fake_samples(generator, latent_dim, n_samples):
 	return X, y
 
 # train the generator and discriminator
-def train(g_model, d_model, gan_model, membership_construction_branch_model, dataset, latent_dim, n_epochs=100, n_batch=128, with_discriminator=True):
+def train(g_model, d_model, gan_model, membership_construction_branch_model, dataset, latent_dim, n_epochs=100, n_batch=128, with_discriminator=True, model_name = 'constructor'):
     cwd = os.getcwd()
-    dir_name = 'constructor'
-    save_dir = os.path.join(cwd, 'saved_models', dir_name)
+    save_dir = os.path.join(cwd, 'saved_models', model_name)
     i = 1
     # don't overwrite previous saved models
     while os.path.isdir(save_dir):
-        save_dir = os.path.join(cwd, 'saved_models', dir_name + f'({i})')
+        save_dir = os.path.join(cwd, 'saved_models', model_name + f'_{i}')
         i += 1
 
     os.makedirs(save_dir)
@@ -282,12 +284,13 @@ def train(g_model, d_model, gan_model, membership_construction_branch_model, dat
                     X_fake, y_fake = generate_fake_samples(g_model, latent_dim, half_batch)
                     # update discriminator model weights
                     d_loss2, _ = d_model.train_on_batch(X_fake, y_fake)
-                    # prepare points in latent space as input for the generator
-                    X_gan = generate_latent_points(latent_dim, n_batch)
-                    # create inverted labels for the fake samples
-                    y_gan = ones((n_batch, 1))
-                    # update the generator via the discriminator's error
-                    g_loss = gan_model.train_on_batch(X_gan, y_gan)
+
+                # prepare points in latent space as input for the generator
+                X_gan = generate_latent_points(latent_dim, n_batch)
+                # create inverted labels for the fake samples
+                y_gan = ones((n_batch, 1))
+                # update the generator via the discriminator's error
+                g_loss = gan_model.train_on_batch(X_gan, y_gan)
 
                 X_gan = generate_latent_points(latent_dim, n_batch)
                 # create inverted labels for the fake samples
