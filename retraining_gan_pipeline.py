@@ -41,10 +41,15 @@ def main():
     parser.add_argument("--no-discriminator", action='store_true',
             help="Do not include discriminator in attack model")
     parser.add_argument("--model-name", help="name to save model under")
-    parser.add_argument("--target-model-name", help="file to load attack model from")
-    parser.add_argument("--lr", help="learning rate for adam", type=float)
+    parser.add_argument("--target-model-name", help="file to load attack model from",
+            default='GAN_discriminator_architecture_model.h5')
+    parser.add_argument("--lr", help="learning rate for adam", type=float, default=0.0002)
     parser.add_argument("--load-generator", action="store_true",
             help="Use pre-trained generator instead of starting from scratch")
+    parser.add_argument("--merged-loss", action="store_true",
+            help="update based on two outputs simultaneously")
+    parser.add_argument("-w", type=float, default=0.5,
+            help="weight to give to attack model's loss, relative to discriminator")
     args = parser.parse_args()
 
     # Setting Seed
@@ -55,12 +60,14 @@ def main():
     latent_dim = 100
     # create the discriminator
     discriminator = define_discriminator()
+    discriminator._name = "discriminator"
     # create the generator
     if args.load_generator:
         generator_path = os.path.join(os.getcwd(), 'GAN_models', 'generator.h5')
         generator = load_model(generator_path)
     else:
         generator = define_generator(latent_dim)
+    generator._name = "generator"
     # create the gan
     gan_branch_model = define_gan(generator, discriminator)
 
@@ -74,12 +81,13 @@ def main():
     attack_model._name = "attack_model"
 
     # create the membership construction branch
-    if args.lr:
-        membership_construction_branch_model = define_membership_constructor(
-                generator, target_model, attack_model, learning_rate=args.lr)
+    if args.merged_loss:
+        membership_construction_branch_model = define_merged_constructor(
+                generator, discriminator, target_model, attack_model, learning_rate=args.lr,
+                w = args.w)
     else:
         membership_construction_branch_model = define_membership_constructor(
-                generator, target_model, attack_model)
+                generator, target_model, attack_model, learning_rate=args.lr)
 
     # plot_model(membership_construction_branch_model, show_shapes=True,
     #         show_layer_names=True, to_file='constructor.png')
@@ -89,7 +97,8 @@ def main():
     # train model
     gen_model = train(generator, discriminator, gan_branch_model,
             membership_construction_branch_model, dataset, latent_dim,
-            with_discriminator=not args.no_discriminator, model_name=args.model_name)
+            with_discriminator=not args.no_discriminator, model_name=args.model_name,
+            merged=args.merged_loss)
 
 
 
@@ -207,6 +216,36 @@ def define_gan(generator, discriminator):
 	model.compile(loss='binary_crossentropy', optimizer=opt)
 	return model
 
+
+def define_merged_constructor(generator, discriminator, target_model, attack_model,
+        learning_rate=0.0002, beta_1=0.5, w=0.5):
+    """
+    param w controls the weight given to the membership model's loss function
+    """
+    assert 0 <= w and w <= 1, "weight param w must be in [0,1]"
+    target_model.trainable = False
+    attack_model.trainable = False
+
+    inputs = keras.Input(shape=(100,))
+    imgs = generator(inputs)
+    # branch 1
+    membership = target_model(imgs)
+    membership = tf.nn.top_k(membership, k=3, sorted=True, name="Top_k_final").values
+    membership = attack_model(membership)
+    # branch 2
+    discrim = discriminator(imgs)
+
+    model = keras.Model(inputs=inputs, outputs=[membership, discrim])
+    opt = tf.keras.optimizers.Adam(learning_rate=learning_rate, beta_1=beta_1)
+    model.compile(loss='binary_crossentropy',
+            optimizer=opt,
+            metrics=['accuracy'],
+            loss_weights={
+                'attack_model': w,
+                'discriminator': 1-w})
+    return model
+
+
 def define_membership_constructor(generator, target_model, attack_model,
         learning_rate=0.0002, beta_1=0.5):
 
@@ -267,8 +306,9 @@ def generate_fake_samples(generator, latent_dim, n_samples):
 	y = zeros((n_samples, 1))
 	return X, y
 
-# train the generator and discriminator
-def train(g_model, d_model, gan_model, membership_construction_branch_model, dataset, latent_dim, n_epochs=100, n_batch=128, with_discriminator=True, model_name = 'constructor'):
+
+
+def make_save_dirs(model_name):
     cwd = os.getcwd()
     save_dir = os.path.join(cwd, 'saved_models', model_name)
     i = 1
@@ -279,6 +319,89 @@ def train(g_model, d_model, gan_model, membership_construction_branch_model, dat
 
     os.makedirs(save_dir)
     log_file = os.path.join(save_dir, 'saved_results.log')
+    return save_dir, log_file
+
+
+def one_batch_merged(g_model, d_model, gan_model, merged_construction_model,
+        dataset, latent_dim, n_batch, with_discriminator=True):
+    half_batch = n_batch // 2
+    # get randomly selected 'real' samples
+    X_real, y_real = generate_real_samples(dataset, half_batch)
+    # update discriminator model weights
+    d_loss1, _ = d_model.train_on_batch(X_real, y_real)
+    # generate 'fake' examples
+    X_fake, y_fake = generate_fake_samples(g_model, latent_dim, half_batch)
+    # update discriminator model weights
+    d_loss2, _ = d_model.train_on_batch(X_fake, y_fake)
+
+    # prepare points in latent space as input for the generator
+    X_gan = generate_latent_points(latent_dim, n_batch)
+    # create inverted labels for the fake samples
+    discrim_out = ones((n_batch, 1))
+    member_out  = keras.utils.to_categorical(ones((n_batch, 1)), 2)
+
+    # update the generator via the discriminator's error
+    mi_loss = merged_construction_model.train_on_batch(
+            X_gan,
+            {'attack_model': member_out,
+             'discriminator': discrim_out})
+
+    return mi_loss
+
+
+def one_batch_split(g_model, d_model, gan_model, membership_construction_branch_model,
+        dataset, latent_dim, n_batch, with_discriminator=True):
+    """
+    Update discriminator and generator sequentially on a single batch
+    """
+    half_batch = n_batch // 2
+    if with_discriminator:
+        # get randomly selected 'real' samples
+        X_real, y_real = generate_real_samples(dataset, half_batch)
+        # update discriminator model weights
+        d_loss1, _ = d_model.train_on_batch(X_real, y_real)
+        # generate 'fake' examples
+        X_fake, y_fake = generate_fake_samples(g_model, latent_dim, half_batch)
+        # update discriminator model weights
+        d_loss2, _ = d_model.train_on_batch(X_fake, y_fake)
+
+    # prepare points in latent space as input for the generator
+    X_gan = generate_latent_points(latent_dim, n_batch)
+    # create inverted labels for the fake samples
+    y_gan = ones((n_batch, 1))
+    # update the generator via the discriminator's error
+    g_loss = gan_model.train_on_batch(X_gan, y_gan)
+
+    X_gan = generate_latent_points(latent_dim, n_batch)
+    # create inverted labels for the fake samples
+    y_gan = ones((n_batch, 1))
+    # update labels to match the attack model's output
+    y_gan = keras.utils.to_categorical(y_gan, 2)
+    # update the generator via the discriminator's error
+    mi_loss = membership_construction_branch_model.train_on_batch(X_gan, y_gan)
+
+    if with_discriminator:
+        return [d_loss1, d_loss2, g_loss, mi_loss]
+    else:
+        return [g_loss, mi_loss]
+
+
+def save_partial_results(g_model, save_dir, epoch_no, latent_dim=100):
+    g_model.save(os.path.join(save_dir, f"epoch{epoch_no}.h5"))
+    imgs, _ = generate_fake_samples(g_model.generator, latent_dim, 25)
+
+    for k in range(25):
+        plt.subplots(5, 5, k+1)
+        plt.axis('off')
+        plt.imshow(imgs[k, :, :, 0], cmap='gray_r')
+    plt.savefig(os.path.join(save_dir, f"epoch{epoch_no}.png"))
+
+
+
+
+# train the generator and discriminator
+def train(g_model, d_model, gan_model, membership_construction_branch_model, dataset, latent_dim, n_epochs=100, n_batch=128, with_discriminator=True, model_name = 'constructor', merged=False):
+    save_dir, log_file = make_save_dirs(model_name)
 
     bat_per_epo = int(dataset.shape[0] / n_batch)
     print("Number of batches:", bat_per_epo)
@@ -289,48 +412,22 @@ def train(g_model, d_model, gan_model, membership_construction_branch_model, dat
         for i in range(n_epochs):
             # enumerate batches over the training set
             for j in range(bat_per_epo):
-                if with_discriminator:
-                    # get randomly selected 'real' samples
-                    X_real, y_real = generate_real_samples(dataset, half_batch)
-                    # update discriminator model weights
-                    d_loss1, _ = d_model.train_on_batch(X_real, y_real)
-                    # generate 'fake' examples
-                    X_fake, y_fake = generate_fake_samples(g_model, latent_dim, half_batch)
-                    # update discriminator model weights
-                    d_loss2, _ = d_model.train_on_batch(X_fake, y_fake)
-
-                # prepare points in latent space as input for the generator
-                X_gan = generate_latent_points(latent_dim, n_batch)
-                # create inverted labels for the fake samples
-                y_gan = ones((n_batch, 1))
-                # update the generator via the discriminator's error
-                g_loss = gan_model.train_on_batch(X_gan, y_gan)
-
-                X_gan = generate_latent_points(latent_dim, n_batch)
-                # create inverted labels for the fake samples
-                y_gan = ones((n_batch, 1))
-                # update labels to match the attack model's output
-                y_gan = keras.utils.to_categorical(y_gan, 2)
-                # update the generator via the discriminator's error
-                mi_loss, _ = membership_construction_branch_model.train_on_batch(X_gan, y_gan)
-                # summarize loss on this batch
+               # summarize loss on this batch
                 #print('>%d, d1=%.3f, d2=%.3f g=%.3f, mi=%.3f' % (i+1, d_loss1, d_loss2, g_loss, mi_loss))
-                if with_discriminator:
-                    loss_str = f"{i+1},{j+1}: {d_loss1}, {d_loss2}, {g_loss}, {mi_loss}"
+                if merged:
+                    f = one_batch_merged
                 else:
-                    loss_str = f"{i+1},{j+1}: {mi_loss}"
+                    f = one_batch_split
+
+                losses = f(g_model, d_model, gan_model,
+                        membership_construction_branch_model,
+                        dataset, latent_dim, n_batch, with_discriminator=with_discriminator)
+                loss_str = f"{i+1},{j+1}: {losses}"
                 print(loss_str)
                 fobj.write(loss_str + '\n')
             if (i+1)%5 == 0 or i == 0:
                 # save partial results
-                g_model.save(os.path.join(save_dir, f"epoch{i+1}.h5"))
-                # take a look at what the generator is doing
-                imgs, _ = generate_fake_samples(g_model, latent_dim, 25)
-                for k in range(25):
-                    plt.subplot(5, 5, k+1)
-                    plt.axis('off')
-                    plt.imshow(imgs[k, :, :, 0], cmap='gray_r')
-                plt.savefig(os.path.join(save_dir, f"epoch{i+1}.png"))
+                save_partial_results(g_model, save_dir, i+1, latent_dim=latent_dim)
 
     # save the generator model
     g_model.save(os.path.join(save_dir, model_name))
