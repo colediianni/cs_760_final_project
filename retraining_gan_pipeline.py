@@ -312,7 +312,7 @@ def train(g_model, d_model, gan_model, membership_construction_branch_model, dat
                 # update labels to match the attack model's output
                 y_gan = keras.utils.to_categorical(y_gan, 2)
                 # update the generator via the discriminator's error
-                mi_loss = membership_construction_branch_model.train_on_batch(X_gan, y_gan)
+                mi_loss, _ = membership_construction_branch_model.train_on_batch(X_gan, y_gan)
                 # summarize loss on this batch
                 #print('>%d, d1=%.3f, d2=%.3f g=%.3f, mi=%.3f' % (i+1, d_loss1, d_loss2, g_loss, mi_loss))
                 if with_discriminator:
