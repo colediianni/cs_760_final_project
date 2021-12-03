@@ -319,11 +319,6 @@ def train(g_model, d_model, gan_model, membership_construction_branch_model, dat
                 plt.savefig(os.path.join(save_dir, f"epoch{i+1}.png"))
 
     # save the generator model
-    if with_discriminator:
-        model_name = "branched_membership_attack_model.h5"
-    else:
-        model_name = "linear_membership_attack_model.h5"
-
     g_model.save(os.path.join(save_dir, model_name))
     return g_model
 
