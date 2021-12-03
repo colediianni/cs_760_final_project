@@ -41,8 +41,10 @@ def main():
     parser.add_argument("--no-discriminator", action='store_true',
             help="Do not include discriminator in attack model")
     parser.add_argument("--model-name", help="name to save model under")
-    # target model name
     parser.add_argument("--target-model-name", help="file to load attack model from")
+    parser.add_argument("--lr", help="learning rate for adam", type=float)
+    parser.add_argument("--load-generator", action="store_true",
+            help="Use pre-trained generator instead of starting from scratch")
     args = parser.parse_args()
 
     # Setting Seed
@@ -54,8 +56,11 @@ def main():
     # create the discriminator
     discriminator = define_discriminator()
     # create the generator
-    generator = define_generator(latent_dim)
-    generator._name = "generator"
+    if args.load_generator:
+        generator_path = os.path.join(os.getcwd(), 'GAN_models', 'generator.h5')
+        generator = load_model(generator_path)
+    else:
+        generator = define_generator(latent_dim)
     # create the gan
     gan_branch_model = define_gan(generator, discriminator)
 
@@ -69,7 +74,12 @@ def main():
     attack_model._name = "attack_model"
 
     # create the membership construction branch
-    membership_construction_branch_model = define_membership_constructor(generator, target_model, attack_model)
+    if args.lr:
+        membership_construction_branch_model = define_membership_constructor(
+                generator, target_model, attack_model, learning_rate=args.lr)
+    else:
+        membership_construction_branch_model = define_membership_constructor(
+                generator, target_model, attack_model)
 
     # plot_model(membership_construction_branch_model, show_shapes=True,
     #         show_layer_names=True, to_file='constructor.png')
@@ -197,7 +207,8 @@ def define_gan(generator, discriminator):
 	model.compile(loss='binary_crossentropy', optimizer=opt)
 	return model
 
-def define_membership_constructor(generator, target_model, attack_model):
+def define_membership_constructor(generator, target_model, attack_model,
+        learning_rate=0.0002, beta_1=0.5):
 
     # Freeze layers (other than generator)
     target_model.trainable = False
@@ -211,7 +222,7 @@ def define_membership_constructor(generator, target_model, attack_model):
     x = tf.nn.top_k(x, k=3, sorted=True, name="Top_k_final").values
     outputs = attack_model(x)
     model = keras.Model(inputs=inputs, outputs=outputs)
-    opt = tf.keras.optimizers.Adam(learning_rate=0.0002, beta_1=0.5)
+    opt = tf.keras.optimizers.Adam(learning_rate=learning_rate, beta_1=beta_1)
     model.compile(loss='binary_crossentropy', optimizer=opt, metrics=['accuracy'])
     return model
 
@@ -310,7 +321,7 @@ def train(g_model, d_model, gan_model, membership_construction_branch_model, dat
                     loss_str = f"{i+1},{j+1}: {mi_loss}"
                 print(loss_str)
                 fobj.write(loss_str + '\n')
-            if (i+1)%5 == 0:
+            if (i+1)%5 == 0 or i == 0:
                 # save partial results
                 g_model.save(os.path.join(save_dir, f"epoch{i+1}.h5"))
                 # take a look at what the generator is doing
