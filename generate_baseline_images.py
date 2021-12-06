@@ -82,8 +82,8 @@ def main():
 	X = model.predict(latent_points)
 	# save figure values to csv file
 	X_to_save = pd.DataFrame(X.reshape((X.shape[0], X.shape[1] * X.shape[2])))
-	X_to_save.to_csv(image_values_file_path)
-	# # plot the result
+	X_to_save.to_csv(image_values_file_path, header=False, index=False)
+	# plot the result
 	save_images_to_folder(X, image_folder_path)
 
 
