@@ -28,13 +28,13 @@ from tensorflow.keras.models import load_model
 from numpy.random import randn
 from matplotlib import pyplot
 
-def make_save_dirs(model_name):
+def make_save_dirs(model_name, target_model_name):
     cwd = os.getcwd()
-    save_dir = os.path.join(cwd, 'saved_latent_points', model_name)
+    save_dir = os.path.join(cwd, 'saved_latent_points', model_name + "_on_" + target_model_name)
     i = 1
     # don't overwrite previous saved models
     while os.path.isdir(save_dir):
-        save_dir = os.path.join(cwd, 'saved_latent_points', model_name + f'_{i}')
+        save_dir = os.path.join(cwd, 'saved_latent_points', model_name + "_on_" + target_model_name + f'_{i}')
         i += 1
 
     os.makedirs(save_dir)
@@ -61,7 +61,7 @@ def main():
     images_array = load_generated_images(args.generator_model_name)
     print(images_array.shape)
 
-    latent_point_folder_path, latent_point_values_file_path = make_save_dirs(args.generator_model_name)
+    latent_point_folder_path, latent_point_values_file_path = make_save_dirs(args.generator_model_name, args.target_model_name)
 
     # load model
     # 'GAN_models/generator.h5'
