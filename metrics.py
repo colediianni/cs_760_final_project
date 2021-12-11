@@ -25,20 +25,25 @@ def main():
     df1 = pd.read_csv(args.dataset1, names=col_names)
     df2 = pd.read_csv(args.dataset2, names=col_names)
 
+    pd.set_option('display.max_rows', None)
+
     distances = all_pairs_closest(df1, df2)
 
     dataset1 = extract_dataset_name(args.dataset1)
     dataset2 = extract_dataset_name(args.dataset2)
     print(dataset1, dataset2)
 
-    closest = distances.sort_values('min_distance').iloc[:3]
+    num_images = 5
+    closest = distances.sort_values('min_distance').iloc[:num_images]
+    print(closest)
 
-    fig, axs = plt.subplots(3, 2)
+    fig, axs = plt.subplots(num_images, 2)
     for i, (yi, xi) in enumerate(zip(closest.index, closest['argmin'])):
         print(yi, xi)
+        print(np.linalg.norm(df1.iloc[xi] - df2.iloc[yi])**2, closest.iloc[i]['min_distance'])
         yimg_name = os.path.join("saved_images", dataset2, 
                 f"generated_image{yi}")
-        ximg_name = os.path.join("saved_images", dataset2,
+        ximg_name = os.path.join("saved_images", dataset1,
                 f"generated_image{xi}")
 
         yimg = img.imread(yimg_name)
@@ -67,7 +72,6 @@ def all_pairs_closest(x, y):
         min_dist, argmin_dist = np.min(distances, axis=0), np.argmin(distances, axis=0)
         for img in range(len(y_slice)):
             mins[img + i] = [min_dist[img], argmin_dist[img]]
-
 
     distances = pd.DataFrame.from_dict(mins, columns=['min_distance', 'argmin'], orient='index')
     return distances

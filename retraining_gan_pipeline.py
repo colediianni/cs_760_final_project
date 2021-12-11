@@ -391,7 +391,7 @@ def save_partial_results(g_model, save_dir, epoch_no, latent_dim=100):
     imgs, _ = generate_fake_samples(g_model, latent_dim, 25)
 
     for k in range(25):
-        plt.subplots(5, 5, k+1)
+        plt.subplot(5, 5, k+1)
         plt.axis('off')
         plt.imshow(imgs[k, :, :, 0], cmap='gray_r')
     plt.savefig(os.path.join(save_dir, f"epoch{epoch_no}.png"))
