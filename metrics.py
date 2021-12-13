@@ -24,14 +24,16 @@ def main():
 
     args = parser.parse_args()
 
+    proportion_plot(args.original, args.target, args.gan_model)
     pair_plot(args.original, args.target, args.gan_model[0])
 
 
 
-def pair_plot(original, target, gan_model, thresholds=[1,20,25]):
+def pair_plot(original, target, gan_model, thresholds=[1,10,25]):
     original_df = get_latent_points(original, target) 
     generated   = get_latent_points(gan_model, target)
-    distances   = all_pairs_closest(generated, original_df)
+    distances   = all_pairs_closest(generated, original_df,
+                                    original=original, gan_model=gan_model, target=target)
 
     image_samples(distances, gan_model, original)
 
@@ -43,7 +45,7 @@ def image_samples(distances, dataset1, dataset2, thresholds=[1,10,25]):
     illustration purposes
     """
     distances = distances.sort_values('min_distance')
-    fig, axs = plt.subplots(len(thresholds), 2)
+    fig, axs = plt.subplots(2, len(thresholds))
 
     for i, t in enumerate(thresholds):
         instance = distances[distances['min_distance'] > t].index[0]
@@ -58,17 +60,17 @@ def image_samples(distances, dataset1, dataset2, thresholds=[1,10,25]):
         yimg = img.imread(yimg_name)
         ximg = img.imread(ximg_name)
 
-        axs[i][0].imshow(ximg)
-        axs[i][0].set_title(f"Generated, t={t}")
-        axs[i][0].set_axis_off()
-        axs[i][1].imshow(yimg)
-        axs[i][1].set_title(f"Original, t={t}")
-        axs[i][1].set_axis_off()
+        axs[0][i].imshow(ximg)
+        axs[0][i].set_title(f"Generated, t={t}")
+        axs[0][i].set_axis_off()
+        axs[1][i].imshow(yimg)
+        axs[1][i].set_title(f"Original, t={t}")
+        axs[1][i].set_axis_off()
 
     plt.show()
 
 
-def proportion_plot(original, target, gan_models):
+def proportion_plot(original, target, gan_models, merged=False):
     models = dict()
     original_df = get_latent_points(original, target)
     for gan_model in gan_models:
@@ -76,18 +78,70 @@ def proportion_plot(original, target, gan_models):
 
     pd.set_option('display.max_rows', 100)
 
-    fig, axs = plt.subplots(1,2)
-    x_max1 = plot_proportion_within(models, original_df, ax=axs[0])
-    x_max2 = plot_proportion_within(models, original_df, ax=axs[1], reverse=True)
-    x_max = max(x_max1, x_max2)
-    for ax in axs:
-        ax.set_xlim(0.0, x_max)
-        ax.set_ylim(0.0, 1.0)
+    if merged:
+        plot_proportion_within_merged(models, original_df,
+                original=original, target=target)
+    else:
+        fig, axs = plt.subplots(1,2)
+        x_max1 = plot_proportion_within(models, original_df, ax=axs[0], 
+                 original=original, target=target)
+        x_max2 = plot_proportion_within(models, original_df, ax=axs[1], 
+                 original=original, target=target, reverse=True)
+        x_max = max(x_max1, x_max2)
+
+        for ax in axs:
+            ax.set_xlim(0.0, x_max)
+            ax.set_ylim(0.0, 1.0)
+        axs[0].get_legend().remove()
     plt.show()
 
 
+def relabel(label):
+    mapping = {
+            'baseline_gan': 'Baseline GAN',
+            'ground_up_gan': 'Our attack (no pre-training)',
+            'retrained_from_working_gan': 'Our attack (pretrained GAN)',
+            'original_second_half_images': "Attacker's dataset"
+            }
+    return mapping.get(label, label)
 
-def plot_proportion_within(models, original_df, ax=None, reverse=False):
+def plot_proportion_within_merged(models, original_df, ax=None, original='', target=''):
+    """
+    Plot parametric curve of proportion of generated data close to training data over
+    proportion of training data close to generated data as a function of threshold
+    """
+
+    for gan_model, df in models.items():
+        generated_close_to_orig = all_pairs_closest(df, original_df,
+                original=original, gan_model=gan_model, target=target)
+        orig_close_to_generated = all_pairs_closest(original_df, df,
+                original=gan_model, gan_model=original, target=target)
+
+        stats_df1 = proportion_within(generated_close_to_orig)
+        stats_df2 = proportion_within(orig_close_to_generated)
+
+        print(stats_df1)
+        print(stats_df2)
+
+        combined = stats_df1.merge(stats_df2, how='outer',
+                    left_index=True, right_index=True)
+        
+        combined['cdf_x'] = combined['cdf_x'].fillna(method='ffill')
+        combined['cdf_y'] = combined['cdf_y'].fillna(method='ffill')
+
+        print(combined)
+
+        sns.lineplot(data=combined, x='cdf_x', y='cdf_y', label=relabel(gan_model), ax=ax)
+        
+        if ax is None:
+            plt.xlabel("Precision")
+            plt.ylabel("Coverage")
+            plt.legend()
+            plt.grid()
+            plt.title("Success rate of attack, as function of threshold")
+
+
+def plot_proportion_within(models, original_df, ax=None, reverse=False, original='', target=''):
     """
     returns smallest threshold such that 99% of observations fall below that
     threshold (for setting axis limits later)
@@ -95,16 +149,18 @@ def plot_proportion_within(models, original_df, ax=None, reverse=False):
     x_max = 0
     for gan_model, df in models.items():
         if reverse:
-            distances = all_pairs_closest(original_df, df)
+            distances = all_pairs_closest(original_df, df, 
+                                          original=gan_model, gan_model=original, target=target)
         else:
-            distances = all_pairs_closest(df, original_df)
+            distances = all_pairs_closest(df, original_df,
+                                          original=original, gan_model=gan_model, target=target)
 
-        print(distances['min_distance'].quantile(q=0.99))
-        x_max = max(x_max, distances['min_distance'].quantile(q=0.99))
+        print(distances['min_distance'].quantile(q=0.95))
+        x_max = max(x_max, distances['min_distance'].quantile(q=0.95))
         print(gan_model)
         print(distances['min_distance'].describe())
         stats_df = proportion_within(distances)
-        sns.lineplot(data=stats_df, x=stats_df.index, y='cdf', label=gan_model, ax=ax)
+        sns.lineplot(data=stats_df, x=stats_df.index, y='cdf', label=relabel(gan_model), ax=ax)
         if reverse:
             title = "Proportion of original images within\nthreshold of generated image"
         else:
@@ -116,11 +172,14 @@ def plot_proportion_within(models, original_df, ax=None, reverse=False):
             plt.grid()
             plt.title(title)
         else:
-            ax.set_xlabel("Threshold")
-            ax.set_ylabel("Proportion")
-            ax.set_title(title)
+            if not reverse:
+                ax.set_ylabel("Proportion")
+            else:
+                ax.set_ylabel("")
             ax.legend()
-            ax.grid()
+            ax.set_xlabel("Threshold")
+            ax.set_title(title)
+            ax.grid(True)
 
     return x_max
 
@@ -148,11 +207,24 @@ def proportion_within(distances):
 
 
 
-def all_pairs_closest(x, y, testing=False):
+def all_pairs_closest(x, y, testing=False, original='', gan_model='', target=''):
     """
     For each row in y, find the row in x which is closest and report the
     euclidean distance
+
+    providing names of models allows results to be saved, greatly speeding up
+    future queries
     """
+    saved_path = os.path.join("pairwise_distances", 
+                              '_'.join([original, gan_model, target]) + '.csv')
+    if original and gan_model and target:
+        try:
+            distances = pd.read_csv(saved_path, index_col=0)
+            return distances
+        except FileNotFoundError:
+            pass
+
+
     mins = dict()
     norm_x = np.linalg.norm(x, axis=1)
     # to avoid running out of memory, cut y into slices
@@ -169,6 +241,8 @@ def all_pairs_closest(x, y, testing=False):
             break
 
     distances = pd.DataFrame.from_dict(mins, columns=['min_distance', 'argmin'], orient='index')
+    if original and gan_model and target:
+        distances.to_csv(saved_path)
     return distances
 
 
